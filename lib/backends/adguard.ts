@@ -75,6 +75,24 @@ function guessType(name: string): DeviceType {
   return "phone";
 }
 
+/**
+ * ¿Es un dispositivo REAL de la LAN? Descarta entradas basura que AdGuard saca
+ * del ARP / /etc/hosts (broadcasthost, 255.255.255.255, localhost, ::1),
+ * multicast/broadcast e IPs públicas. Sólo IPv4 privada (10/8, 172.16/12, 192.168/16).
+ */
+function isRealLanClient(ip: string, name: string): boolean {
+  if (!/^\d{1,3}(\.\d{1,3}){3}$/.test(ip)) return false; // sólo IPv4
+  const [a, b, , d] = ip.split(".").map(Number);
+  if (a === 127) return false; // loopback
+  if (a >= 224) return false; // multicast / reservado
+  if (a === 255 || d === 255) return false; // broadcast
+  const priv = a === 10 || (a === 192 && b === 168) || (a === 172 && b >= 16 && b <= 31);
+  if (!priv) return false;
+  const n = name.trim().toLowerCase();
+  if (n === "broadcasthost" || n === "localhost") return false;
+  return true;
+}
+
 export class AdGuardBackend implements NetworkBackend {
   private base: string;
   private user?: string;
@@ -169,7 +187,12 @@ export class AdGuardBackend implements NetworkBackend {
       const mac = c.ids.find((i) => /^([0-9a-f]{2}:){5}[0-9a-f]{2}$/i.test(i)) ?? "";
       push(c.name, ip, mac, c);
     }
-    for (const a of autos) push(a.name, a.ip, "", undefined);
+    // sólo auto-clientes que son dispositivos reales de la LAN
+    // (descarta broadcasthost, 255.255.255.255, localhost, ::1, multicast, IPs públicas)
+    for (const a of autos) {
+      if (!isRealLanClient(a.ip, a.name)) continue;
+      push(a.name, a.ip, "", undefined);
+    }
 
     const devices = [...byIp.values()];
 
