@@ -38,12 +38,26 @@ class DemoBackend implements NetworkBackend {
 
 let instance: NetworkBackend | null = null;
 
-/** Selecciona el backend. Hoy: demo. Mañana: según env NETCONTROL_BACKEND. */
+/**
+ * Selecciona el backend según la variable de entorno NETCONTROL_BACKEND.
+ *   (sin valor) | "demo" -> datos simulados (por defecto)
+ *   "adguard"            -> AdGuard Home real (ver lib/backends/adguard.ts)
+ */
 export function getBackend(): NetworkBackend {
   if (!instance) {
-    // const kind = process.env.NETCONTROL_BACKEND;
-    // switch (kind) { case "pihole": instance = new PiholeBackend(...); break; ... }
-    instance = new DemoBackend();
+    const kind = (process.env.NETCONTROL_BACKEND || "demo").toLowerCase();
+    switch (kind) {
+      case "adguard": {
+        // import perezoso: sólo se carga si se usa este backend
+        const { AdGuardBackend } = require("./backends/adguard") as typeof import("./backends/adguard");
+        instance = new AdGuardBackend();
+        break;
+      }
+      // case "pihole":  instance = new PiholeBackend();  break;
+      // case "openwrt": instance = new OpenWrtBackend(); break;
+      default:
+        instance = new DemoBackend();
+    }
   }
   return instance;
 }

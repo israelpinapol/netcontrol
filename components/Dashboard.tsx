@@ -6,6 +6,11 @@ import { DeviceIcon, Icon } from "./icons";
 
 const DAYS = ["D", "L", "M", "M", "J", "V", "S"];
 
+/** Envía una orden al backend (demo = no-op; adaptador real = ejecuta en tu red). */
+function post(url: string, body: unknown) {
+  fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }).catch(() => {});
+}
+
 function StatCard({ icon, label, value, unit, tone = "brand" }: { icon: string; label: string; value: string; unit?: string; tone?: string }) {
   const toneMap: Record<string, string> = {
     brand: "text-brand", accent: "text-accent", ok: "text-ok", warn: "text-warn", danger: "text-danger",
@@ -34,8 +39,8 @@ export default function Dashboard({ initial }: { initial: NetworkSnapshot }) {
   const [snap, setSnap] = useState<NetworkSnapshot>(initial);
   const [testing, setTesting] = useState(false);
 
-  const maxHour = useMemo(() => Math.max(...snap.usageByHour.map((u) => u.gb)), [snap.usageByHour]);
-  const totalCat = useMemo(() => snap.usageByCategory.reduce((a, c) => a + c.gb, 0), [snap.usageByCategory]);
+  const maxHour = useMemo(() => Math.max(1, ...snap.usageByHour.map((u) => u.gb)), [snap.usageByHour]);
+  const totalCat = useMemo(() => snap.usageByCategory.reduce((a, c) => a + c.gb, 0) || 1, [snap.usageByCategory]);
   const newDevices = snap.devices.filter((d) => d.isNew);
 
   function setStatus(id: string, status: DeviceStatus) {
@@ -49,7 +54,7 @@ export default function Dashboard({ initial }: { initial: NetworkSnapshot }) {
         totals: { ...s.totals, devicesOnline: devices.filter((d) => d.online).length, blockedCount: devices.filter((d) => d.status === "blocked").length },
       };
     });
-    fetch("/api/network", { method: "GET" }).catch(() => {}); // demo: el adaptador real haría POST
+    post("/api/device", { id, status });
   }
 
   function approveNew(id: string) {
@@ -57,19 +62,27 @@ export default function Dashboard({ initial }: { initial: NetworkSnapshot }) {
   }
 
   function toggleRule(id: string) {
-    setSnap((s) => ({ ...s, rules: s.rules.map((r) => (r.id === id ? { ...r, enabled: !r.enabled } : r)) }));
+    const enabled = !snap.rules.find((r) => r.id === id)?.enabled;
+    setSnap((s) => ({ ...s, rules: s.rules.map((r) => (r.id === id ? { ...r, enabled } : r)) }));
+    post("/api/rule", { id, enabled });
   }
   function toggleSchedule(id: string) {
-    setSnap((s) => ({ ...s, schedules: s.schedules.map((sc) => (sc.id === id ? { ...sc, enabled: !sc.enabled } : sc)) }));
+    const enabled = !snap.schedules.find((sc) => sc.id === id)?.enabled;
+    setSnap((s) => ({ ...s, schedules: s.schedules.map((sc) => (sc.id === id ? { ...sc, enabled } : sc)) }));
+    post("/api/schedule", { id, enabled });
   }
 
   async function runSpeedTest() {
     setTesting(true);
-    await new Promise((r) => setTimeout(r, 1600));
-    setSnap((s) => ({
-      ...s,
-      speed: { ...s.speed, downMbps: 290 + Math.round(Math.random() * 60), upMbps: 36 + Math.round(Math.random() * 10), pingMs: 9 + Math.round(Math.random() * 8) },
-    }));
+    try {
+      const res = await fetch("/api/speedtest", { method: "POST" });
+      const r = (await res.json()) as { downMbps: number; upMbps: number; pingMs: number };
+      if (r && r.downMbps > 0) {
+        setSnap((s) => ({ ...s, speed: { ...s.speed, downMbps: r.downMbps, upMbps: r.upMbps, pingMs: r.pingMs } }));
+      }
+    } catch {
+      /* backend sin test de velocidad (p. ej. AdGuard) */
+    }
     setTesting(false);
   }
 
@@ -168,6 +181,7 @@ export default function Dashboard({ initial }: { initial: NetworkSnapshot }) {
             </div>
           </div>
 
+          {snap.usageByCategory.length > 0 && (
           <div className="card p-4">
             <h2 className="mb-3 flex items-center gap-2 text-sm font-semibold text-white"><Icon name="data" className="h-4 w-4 text-accent" />Uso por categoría</h2>
             <div className="mb-3 flex h-3 w-full overflow-hidden rounded-full">
@@ -184,10 +198,12 @@ export default function Dashboard({ initial }: { initial: NetworkSnapshot }) {
               ))}
             </ul>
           </div>
+          )}
         </section>
       </div>
 
       {/* Ancho de banda por hora */}
+      {snap.usageByHour.length > 0 && (
       <section className="card mt-5 p-4">
         <h2 className="mb-4 flex items-center gap-2 text-sm font-semibold text-white"><Icon name="data" className="h-4 w-4 text-brand" />Consumo de hoy por hora</h2>
         <div className="flex h-40 items-end gap-1.5 sm:gap-2">
@@ -200,6 +216,7 @@ export default function Dashboard({ initial }: { initial: NetworkSnapshot }) {
           ))}
         </div>
       </section>
+      )}
 
       <div className="mt-5 grid grid-cols-1 gap-5 lg:grid-cols-2">
         {/* Reglas de bloqueo */}
