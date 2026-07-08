@@ -1,4 +1,5 @@
 import type {
+  AccessRequest,
   BlockRule,
   CategoryUsage,
   Device,
@@ -98,6 +99,11 @@ const speed: SpeedSample = {
   planDownMbps: 500, at: "2026-07-08T13:45:00Z",
 };
 
+const accessRequests: AccessRequest[] = [
+  { mac: "AE:5F:22:0D:91:3C", ip: "192.168.1.90", name: "Samsung-Galaxy (invitado)", since: "2026-07-08T13:52:00Z" },
+  { mac: "62:11:C8:74:2B:10", ip: "192.168.1.91", name: "Dispositivo desconocido", since: "2026-07-08T13:58:00Z" },
+];
+
 export function buildSnapshot(): NetworkSnapshot {
   const online = devices.filter((d) => d.online);
   return {
@@ -111,6 +117,7 @@ export function buildSnapshot(): NetworkSnapshot {
     schedules,
     usageByHour,
     usageByCategory,
+    accessRequests,
     totals: {
       devicesOnline: online.length,
       usageTodayGb: Number(devices.reduce((a, d) => a + d.usageTodayGb, 0).toFixed(1)),

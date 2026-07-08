@@ -61,6 +61,12 @@ export default function Dashboard({ initial }: { initial: NetworkSnapshot }) {
     setSnap((s) => ({ ...s, devices: s.devices.map((d) => (d.id === id ? { ...d, isNew: false, name: "Dispositivo aprobado" } : d)), totals: { ...s.totals, newDevices: s.totals.newDevices - 1 } }));
   }
 
+  // Admisión a la red (portal cautivo / NAC): el admin da o niega acceso.
+  function setAccess(mac: string, grant: boolean) {
+    setSnap((s) => ({ ...s, accessRequests: s.accessRequests.filter((a) => a.mac !== mac) }));
+    post("/api/access", { mac, grant });
+  }
+
   function toggleRule(id: string) {
     const enabled = !snap.rules.find((r) => r.id === id)?.enabled;
     setSnap((s) => ({ ...s, rules: s.rules.map((r) => (r.id === id ? { ...r, enabled } : r)) }));
@@ -122,6 +128,33 @@ export default function Dashboard({ initial }: { initial: NetworkSnapshot }) {
         <StatCard icon="devices" label="Dispositivos" value={String(snap.totals.devicesOnline)} unit="online" tone="warn" />
         <StatCard icon="data" label="Datos hoy" value={snap.totals.usageTodayGb.toFixed(1)} unit="GB" tone="danger" />
       </section>
+
+      {/* Solicitudes de acceso a la red (portal cautivo / NAC) */}
+      {snap.accessRequests.length > 0 && (
+        <section className="card mb-5 border-accent/30 bg-accent/5 p-4">
+          <div className="flex items-center gap-2 text-accent">
+            <Icon name="shield" className="h-5 w-5" />
+            <h2 className="text-sm font-semibold">Solicitudes de acceso a la red · el administrador decide quién entra</h2>
+          </div>
+          <div className="mt-3 space-y-2">
+            {snap.accessRequests.map((a) => (
+              <div key={a.mac} className="flex flex-wrap items-center justify-between gap-3 rounded-xl bg-base-700/60 p-3">
+                <div className="flex items-center gap-3">
+                  <DeviceIcon type="phone" className="h-5 w-5 text-slate-300" />
+                  <div>
+                    <p className="text-sm font-medium text-white">{a.name}</p>
+                    <p className="font-mono text-xs text-slate-400">{a.mac}{a.ip ? ` · ${a.ip}` : ""}</p>
+                  </div>
+                </div>
+                <div className="flex gap-2">
+                  <button onClick={() => setAccess(a.mac, true)} className="btn btn-ok"><Icon name="check" className="h-4 w-4" />Dar acceso</button>
+                  <button onClick={() => setAccess(a.mac, false)} className="btn btn-danger"><Icon name="block" className="h-4 w-4" />Denegar</button>
+                </div>
+              </div>
+            ))}
+          </div>
+        </section>
+      )}
 
       {/* Nuevos dispositivos */}
       {newDevices.length > 0 && (

@@ -254,6 +254,7 @@ export class AdGuardBackend implements NetworkBackend {
       schedules,
       usageByHour: [], // ancho de banda por hora: requiere OpenWRT
       usageByCategory: [],
+      accessRequests: [], // admisión a la red (portal cautivo): requiere gateway (OpenWRT)
       totals: {
         devicesOnline: online.length,
         usageTodayGb: 0,
@@ -291,6 +292,12 @@ export class AdGuardBackend implements NetworkBackend {
       name: clientName,
       data: { ...client, blocked_services: [...set] },
     });
+  }
+
+  async setAccess(mac: string, grant: boolean): Promise<void> {
+    // AdGuard (DNS) no admite/expulsa de la red; lo más cercano es permitir o
+    // cortar el DNS de ese cliente por IP/MAC. Para admisión real usa OpenWRT.
+    await this.setDeviceStatus(mac, grant ? "allowed" : "blocked");
   }
 
   async toggleSchedule(scheduleId: string, enabled: boolean): Promise<void> {

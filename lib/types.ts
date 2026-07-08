@@ -50,6 +50,14 @@ export interface Schedule {
   enabled: boolean;
 }
 
+/** Dispositivo en CUARENTENA esperando que el administrador le dé acceso a la red. */
+export interface AccessRequest {
+  mac: string;
+  ip: string;
+  name: string;
+  since: string; // ISO o ""
+}
+
 export interface SpeedSample {
   downMbps: number;
   upMbps: number;
@@ -81,6 +89,8 @@ export interface NetworkSnapshot {
   schedules: Schedule[];
   usageByHour: UsagePoint[];
   usageByCategory: CategoryUsage[];
+  /** Dispositivos en cuarentena esperando aprobación del admin (portal cautivo / NAC). */
+  accessRequests: AccessRequest[];
   totals: {
     devicesOnline: number;
     usageTodayGb: number;

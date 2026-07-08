@@ -99,7 +99,33 @@ En Vercel, define las mismas variables en **Project → Settings → Environment
 | Uso (consultas por cliente) | ✅ |
 | Mbps/GB por equipo · test velocidad | ❌ → añade **OpenWRT** (gratis) |
 
-> Para Mbps/GB reales y corte a nivel de firewall, el siguiente adaptador gratis es **OpenWRT** (`luci-app-nlbwmon` para ancho de banda por dispositivo). Está previsto como `OpenWrtBackend` en `getBackend()`.
+> Para Mbps/GB reales y corte a nivel de firewall, el siguiente adaptador gratis es **OpenWRT** (`luci-app-nlbwmon` para ancho de banda por dispositivo).
+
+## 🚪 Control TOTAL con OpenWRT (gratis) — admitir/echar dispositivos + portal cautivo
+
+El DNS (AdGuard) filtra contenido pero **no decide quién entra a la red** (un usuario se pone otro DNS y se lo salta). Para "control total" —admitir dispositivos nuevos, dar acceso dinámico, cortar de verdad— hay que controlar el **gateway**. Eso lo hace **OpenWRT** (firmware libre).
+
+**Modelo:**
+```
+Módem ── [Router OpenWRT] ── Wi-Fi/casa
+   Dispositivo nuevo → CUARENTENA (portal cautivo, sin internet)
+   Admin lo aprueba en NetControl → regla de firewall → acceso dinámico ✅
+```
+
+Backend real en [`lib/backends/openwrt.ts`](lib/backends/openwrt.ts) (vía **ubus** JSON-RPC). Qué hace cada método:
+
+| Método | Cómo en OpenWRT |
+|--------|-----------------|
+| `getSnapshot()` | leases DHCP (`luci-rpc getDHCPLeases`) + estado del portal (`ndsctl json`) + uso por MAC (`nlbw`) |
+| `setDeviceStatus()` (cortar/permitir) | regla de firewall `nc-block-<mac>` (uci + `/etc/init.d/firewall reload`) |
+| `setAccess(mac, grant)` (admitir/echar) | `ndsctl auth <mac>` / `ndsctl deauth <mac>` (portal cautivo opennds) |
+| `runSpeedTest()` | `speedtest-netperf` |
+
+**Paquetes en el router:** `luci-mod-rpc`, `rpcd-mod-file`, `opennds` (portal cautivo), `luci-app-nlbwmon` (ancho de banda, opcional). Un usuario rpcd con ACL para `luci-rpc`, `uci` (firewall) y `file exec`.
+
+**Activar:** en `.env` (o env de Vercel) `NETCONTROL_BACKEND=openwrt` + `OPENWRT_URL/USER/PASS`. Combínalo con AdGuard para el filtrado de webs/apps.
+
+> `setAccess` es la "página web donde el administrador da acceso": los dispositivos en cuarentena aparecen en el panel en **Solicitudes de acceso a la red** con botones *Dar acceso / Denegar*.
 
 ## Deploy
 

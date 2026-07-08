@@ -15,6 +15,12 @@ export interface NetworkBackend {
   toggleRule(ruleId: string, enabled: boolean): Promise<void>;
   toggleSchedule(scheduleId: string, enabled: boolean): Promise<void>;
   runSpeedTest(): Promise<{ downMbps: number; upMbps: number; pingMs: number }>;
+  /**
+   * Admisión a la red (NAC / portal cautivo). `grant=true` da acceso al MAC;
+   * `grant=false` lo deja/echa en cuarentena. Solo backends que controlan el
+   * gateway (OpenWRT) lo aplican de verdad.
+   */
+  setAccess(mac: string, grant: boolean): Promise<void>;
 }
 
 /**
@@ -31,6 +37,7 @@ class DemoBackend implements NetworkBackend {
   }
   async toggleRule(): Promise<void> {}
   async toggleSchedule(): Promise<void> {}
+  async setAccess(): Promise<void> {}
   async runSpeedTest() {
     return { downMbps: 305 + Math.round(Math.random() * 40), upMbps: 38 + Math.round(Math.random() * 8), pingMs: 10 + Math.round(Math.random() * 6) };
   }
@@ -42,6 +49,7 @@ let instance: NetworkBackend | null = null;
  * Selecciona el backend según la variable de entorno NETCONTROL_BACKEND.
  *   (sin valor) | "demo" -> datos simulados (por defecto)
  *   "adguard"            -> AdGuard Home real (ver lib/backends/adguard.ts)
+ *   "openwrt"            -> OpenWRT real: control de gateway + portal cautivo (ver lib/backends/openwrt.ts)
  */
 export function getBackend(): NetworkBackend {
   if (!instance) {
@@ -53,8 +61,12 @@ export function getBackend(): NetworkBackend {
         instance = new AdGuardBackend();
         break;
       }
+      case "openwrt": {
+        const { OpenWrtBackend } = require("./backends/openwrt") as typeof import("./backends/openwrt");
+        instance = new OpenWrtBackend();
+        break;
+      }
       // case "pihole":  instance = new PiholeBackend();  break;
-      // case "openwrt": instance = new OpenWrtBackend(); break;
       default:
         instance = new DemoBackend();
     }
