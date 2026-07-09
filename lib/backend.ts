@@ -66,6 +66,12 @@ export function getBackend(): NetworkBackend {
         instance = new OpenWrtBackend();
         break;
       }
+      case "agent": {
+        // plataforma pública: control por agente en la LAN (cualquier router)
+        const { AgentBackend } = require("./backends/agent") as typeof import("./backends/agent");
+        instance = new AgentBackend();
+        break;
+      }
       // case "pihole":  instance = new PiholeBackend();  break;
       default:
         instance = new DemoBackend();

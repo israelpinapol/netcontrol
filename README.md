@@ -101,6 +101,35 @@ En Vercel, define las mismas variables en **Project → Settings → Environment
 
 > Para Mbps/GB reales y corte a nivel de firewall, el siguiente adaptador gratis es **OpenWRT** (`luci-app-nlbwmon` para ancho de banda por dispositivo).
 
+## 🌐 Plataforma pública — funciona con CUALQUIER router (vía Agente)
+
+Una web en la nube **no puede** controlar "cualquier módem" con solo su contraseña: cada módem es distinto (sin API universal) y está detrás del NAT de casa (la nube no lo alcanza). La forma que sí funciona con **cualquier red** —igual que Firewalla / Fing / Domotz— es un **Agente** que corre en la LAN del usuario:
+
+```
+Plataforma (nube)  ◄──saliente──  Agente (LAN del usuario)  ──►  módem/router (cualquiera)
+   panel + cuentas                descubre y controla por ARP
+```
+
+- **Universal**: descubre dispositivos por **ARP** (sin API del router) → sirve con cualquier módem.
+- **Sin abrir puertos**: el agente conecta hacia afuera (o se expone con Cloudflare Tunnel / Tailscale, gratis).
+- **Tu modelo de acceso dinámico**: dispositivo nuevo entra en **cuarentena**; el admin lo aprueba desde la web y obtiene acceso.
+
+**Agente:** [`agent/netcontrol-agent.mjs`](agent/netcontrol-agent.mjs) (Node, sin dependencias). Levántalo en la red:
+```bash
+node agent/netcontrol-agent.mjs      # API local en http://127.0.0.1:4000
+# corte real de equipos (ARP) requiere permisos:  sudo node agent/netcontrol-agent.mjs
+```
+Conecta el panel con `NETCONTROL_BACKEND=agent` + `AGENT_URL` (ver `.env.example`). Adaptador: [`lib/backends/agent.ts`](lib/backends/agent.ts).
+
+| Capacidad | Estado |
+|---|---|
+| Descubrir dispositivos (cualquier router) | ✅ por ARP |
+| Cuarentena + aprobar/negar acceso (admin) | ✅ |
+| Marcar cortar/permitir por dispositivo | ✅ (plano de control) |
+| **Corte de red efectivo** | ⚠️ requiere el enforcer con permisos (ARP-control con `sudo`) o un router con API (OpenWRT) |
+
+> El "plano de control" (quién entra, quién se corta) funciona con cualquier router. La **aplicación física** del corte, de forma 100% universal, necesita `sudo` (ARP) — o, mejor, un router con API (OpenWRT) que corta a nivel de firewall sin trucos.
+
 ## 🚪 Control TOTAL con OpenWRT (gratis) — admitir/echar dispositivos + portal cautivo
 
 El DNS (AdGuard) filtra contenido pero **no decide quién entra a la red** (un usuario se pone otro DNS y se lo salta). Para "control total" —admitir dispositivos nuevos, dar acceso dinámico, cortar de verdad— hay que controlar el **gateway**. Eso lo hace **OpenWRT** (firmware libre).
