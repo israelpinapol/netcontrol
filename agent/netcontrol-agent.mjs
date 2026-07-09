@@ -1,22 +1,18 @@
 #!/usr/bin/env node
 // NetControl Agent — corre en la red del usuario (cualquier router/módem).
-// Descubre dispositivos por ARP (universal, sin API del router) y expone una
-// API local que el panel/plataforma consume. La aplicación real de "cortar"
-// (enforcement) es un punto conectable: ARP-control con permisos, o API del
-// router si existe. Sin dependencias: solo Node.
+// Descubre dispositivos por ARP y mide datos REALES (fabricante, latencia,
+// estado, ancho de banda de la línea). El corte real de un equipo se hace por
+// ARP (necesita ejecutar el agente con `sudo`). Sin dependencias: solo Node.
 //
-// Uso:   node agent/netcontrol-agent.mjs
-// Env:   AGENT_PORT=4000  AGENT_TOKEN=<secreto opcional>  ROUTER_NAME="Casa"
+// Uso:
+//   node agent/netcontrol-agent.mjs          (ver + descubrir, sin corte real)
+//   sudo node agent/netcontrol-agent.mjs      (además CORTA de verdad por ARP)
 //
-// Endpoints:
-//   GET  /snapshot            -> { routerName, gatewayIp, devices[], accessRequests[] }
-//   POST /device  {mac,status}-> allowed | blocked | paused
-//   POST /access  {mac,grant} -> admite (grant=true) o deja en cuarentena
-//   GET  /health
+// Env: AGENT_PORT=4000  AGENT_TOKEN=<secreto>  ROUTER_NAME="Casa"
 
 import http from "node:http";
 import os from "node:os";
-import { exec as _exec } from "node:child_process";
+import { exec as _exec, spawn } from "node:child_process";
 import { promisify } from "node:util";
 import { readFileSync, writeFileSync, existsSync } from "node:fs";
 import { fileURLToPath } from "node:url";
@@ -28,26 +24,41 @@ const TOKEN = process.env.AGENT_TOKEN || "";
 const ROUTER_NAME = process.env.ROUTER_NAME || "Casa - Agente NetControl";
 const __dir = path.dirname(fileURLToPath(import.meta.url));
 const STATE_FILE = path.join(__dir, "agent-state.json");
+const ARP_CUT = path.join(__dir, "arp-cut.py");
+const IS_ROOT = typeof process.getuid === "function" && process.getuid() === 0;
 
-// ---- estado persistente (aprobados / bloqueados / conocidos) ----
+/* ---- fabricantes por OUI (prefijo del MAC) — subconjunto común ---- */
+const OUI = {
+  "a4:83:e7": "Apple", "f0:18:98": "Apple", "5c:af:06": "Apple", "3c:22:fb": "Apple",
+  "dc:a9:04": "Apple", "a8:5c:2c": "Apple", "bc:d0:74": "Apple", "88:66:5a": "Apple",
+  "ac:bc:32": "Apple", "f0:99:bf": "Apple", "d0:81:7a": "Apple", "9c:fc:01": "Apple",
+  "5c:0a:5b": "Samsung", "e8:50:8b": "Samsung", "78:1f:db": "Samsung", "8c:77:12": "Samsung",
+  "1c:f2:9a": "Google", "f4:f5:d8": "Google", "da:a1:19": "Google", "3c:5a:b4": "Google",
+  "68:37:e9": "Amazon", "fc:65:de": "Amazon", "44:65:0d": "Amazon", "50:dc:e7": "Amazon",
+  "34:41:5d": "Intel", "3c:a6:f6": "Intel", "e4:5f:01": "Raspberry Pi", "b8:27:eb": "Raspberry Pi",
+  "dc:a6:32": "Raspberry Pi", "50:c7:bf": "TP-Link", "b0:be:76": "TP-Link", "c0:06:c3": "TP-Link",
+  "78:c8:81": "Sony", "00:d9:d1": "Sony", "7c:1e:52": "Microsoft", "00:50:f2": "Microsoft",
+  "d8:3a:dd": "Raspberry Pi", "2c:cf:67": "Raspberry Pi",
+};
+function vendorOf(mac) { return OUI[mac.slice(0, 8)] || ""; }
+function isRandomMac(mac) {
+  const first = parseInt(mac.slice(0, 2), 16);
+  return Number.isFinite(first) && (first & 0x02) !== 0; // bit "localmente administrado"
+}
+
+/* ---- estado persistente ---- */
 function loadState() {
-  try {
-    return JSON.parse(readFileSync(STATE_FILE, "utf8"));
-  } catch {
-    return { approved: {}, blocked: {}, known: {} }; // mac -> true / firstSeen
-  }
+  try { return JSON.parse(readFileSync(STATE_FILE, "utf8")); }
+  catch { return { approved: {}, blocked: {}, known: {} }; }
 }
-function saveState(s) {
-  try { writeFileSync(STATE_FILE, JSON.stringify(s, null, 2)); } catch {}
-}
+function saveState(s) { try { writeFileSync(STATE_FILE, JSON.stringify(s, null, 2)); } catch {} }
 let state = loadState();
 
-// ---- red local: interfaz activa, ip, máscara, gateway ----
+/* ---- red local ---- */
 function activeIface() {
-  const ifaces = os.networkInterfaces();
-  for (const [name, addrs] of Object.entries(ifaces)) {
+  for (const [name, addrs] of Object.entries(os.networkInterfaces())) {
     for (const a of addrs || []) {
-      if (a.family === "IPv4" && !a.internal) return { name, ip: a.address, netmask: a.netmask };
+      if (a.family === "IPv4" && !a.internal) return { name, ip: a.address, netmask: a.netmask, mac: (a.mac || "").toLowerCase() };
     }
   }
   return null;
@@ -69,29 +80,34 @@ function ipsInSubnet(ip, netmask) {
   return out;
 }
 
-// ---- descubrimiento por ARP (universal) ----
+/* ---- ping: descubre + mide latencia REAL ---- */
+async function pingHost(ip) {
+  try {
+    const { stdout } = await exec(`ping -c1 -t1 -W900 ${ip} 2>/dev/null`);
+    const m = stdout.match(/time[=<]\s*([\d.]+)\s*ms/);
+    return m ? Math.round(Number(m[1]) * 10) / 10 : 0.1; // respondió
+  } catch { return null; } // sin respuesta
+}
 async function pingSweep(ips) {
-  // Poblar la tabla ARP mandando 1 ping corto a cada IP, en paralelo por lotes.
-  const batch = 64;
+  const rtt = new Map();
+  const batch = 48;
   for (let i = 0; i < ips.length; i += batch) {
-    await Promise.all(
-      ips.slice(i, i + batch).map((ip) =>
-        exec(`ping -c1 -t1 -W1 ${ip} >/dev/null 2>&1`).catch(() => {}),
-      ),
-    );
+    await Promise.all(ips.slice(i, i + batch).map(async (ip) => {
+      const ms = await pingHost(ip);
+      if (ms !== null) rtt.set(ip, ms);
+    }));
   }
+  return rtt;
 }
 async function readArp() {
   const { stdout } = await exec("arp -an");
   const rows = [];
   for (const line of stdout.split("\n")) {
-    // ? (192.168.1.10) at a4:83:e7:1c:22:9f on en0 ...
     const m = line.match(/\(([\d.]+)\) at ([0-9a-f:]{11,17})/i);
     if (!m) continue;
     const ip = m[1];
     const mac = m[2].toLowerCase().split(":").map((h) => h.padStart(2, "0")).join(":");
     const first = Number(ip.split(".")[0]);
-    // descarta broadcast y multicast (no son dispositivos reales)
     if (mac === "ff:ff:ff:ff:ff:ff" || ip.endsWith(".255") || first >= 224) continue;
     if (mac.startsWith("01:00:5e") || mac.startsWith("33:33")) continue;
     rows.push({ ip, mac });
@@ -101,140 +117,201 @@ async function readArp() {
 async function rdns(ip) {
   try {
     const { stdout } = await exec(`dscacheutil -q host -a ip_address ${ip} 2>/dev/null || true`);
-    const m = stdout.match(/name:\s*(\S+)/);
+    const m = stdout.match(/^name:\s*(\S+)/m);
     return m ? m[1].split(".")[0] : "";
   } catch { return ""; }
 }
 
-async function discover() {
-  const ifc = activeIface();
-  if (!ifc) return { gateway: "", devices: [] };
-  const gw = await gatewayIp();
-  await pingSweep(ipsInSubnet(ifc.ip, ifc.netmask));
-  const arp = await readArp();
-  // añadir el propio equipo
-  if (!arp.find((r) => r.ip === ifc.ip)) {
-    const selfMac = (os.networkInterfaces()[ifc.name] || []).find((a) => a.mac && a.mac !== "00:00:00:00:00:00");
-    arp.push({ ip: ifc.ip, mac: (selfMac?.mac || "00:00:00:00:00:00").toLowerCase() });
-  }
-  const devices = [];
-  for (const r of arp) {
-    const name = (await rdns(r.ip)) || "";
-    devices.push({ ...r, name, isGateway: r.ip === gw });
-  }
-  return { gateway: gw, devices };
+/* ---- ancho de banda REAL de la línea (netstat delta) ---- */
+let lastBW = null; // {bytesIn, bytesOut, t}
+let peakDown = 1;
+async function lineBandwidth(iface) {
+  try {
+    const { stdout } = await exec(`netstat -ibn -I ${iface} 2>/dev/null`);
+    const line = stdout.split("\n").find((l) => l.startsWith(iface) && /\d{4,}/.test(l));
+    if (!line) return { downMbps: 0, upMbps: 0 };
+    const f = line.trim().split(/\s+/);
+    // columnas: Name Mtu Network Address Ipkts Ierrs Ibytes Opkts Oerrs Obytes ...
+    const ibytes = Number(f[6]); const obytes = Number(f[9]);
+    const now = Date.now();
+    let down = 0, up = 0;
+    if (lastBW && ibytes >= lastBW.bytesIn) {
+      const dt = (now - lastBW.t) / 1000;
+      if (dt > 0.5) {
+        down = ((ibytes - lastBW.bytesIn) * 8) / dt / 1e6;
+        up = ((obytes - lastBW.bytesOut) * 8) / dt / 1e6;
+      }
+    }
+    lastBW = { bytesIn: ibytes, bytesOut: obytes, t: now };
+    down = Math.round(down * 10) / 10; up = Math.round(up * 10) / 10;
+    peakDown = Math.max(peakDown, down, 1);
+    return { downMbps: down, upMbps: up };
+  } catch { return { downMbps: 0, upMbps: 0 }; }
 }
 
-// ---- snapshot para el panel ----
+/* ---- ENFORCEMENT real: ARP-cut por MAC (requiere root) ---- */
+const cutProcs = new Map(); // mac -> child process
+function pythonBin() { return existsSync("/usr/bin/python3") ? "/usr/bin/python3" : "python3"; }
+function startCut(ifc, gw, ip, mac) {
+  if (!IS_ROOT || cutProcs.has(mac) || !existsSync(ARP_CUT)) return;
+  const p = spawn(pythonBin(), [ARP_CUT, ifc.name, ifc.mac, gw, ip, mac], { stdio: "ignore" });
+  cutProcs.set(mac, p);
+  p.on("exit", () => cutProcs.delete(mac));
+  console.log(`[cut] ARP-cut ACTIVO sobre ${ip} (${mac})`);
+}
+function stopCut(mac) {
+  const p = cutProcs.get(mac);
+  if (p) { try { p.kill("SIGTERM"); } catch {} cutProcs.delete(mac); console.log(`[cut] restaurado ${mac}`); }
+}
+
+/* ---- descubrimiento + snapshot ---- */
+function guessType(name, vendor) {
+  const n = `${name} ${vendor}`.toLowerCase();
+  if (/iphone|android|phone|pixel|galaxy|samsung/.test(n)) return "phone";
+  if (/ipad|tablet/.test(n)) return "tablet";
+  if (/tv|roku|chromecast|firestick|google/.test(n)) return "tv";
+  if (/playstation|ps4|ps5|xbox|nintendo|switch|sony/.test(n)) return "console";
+  if (/macbook|laptop/.test(n)) return "laptop";
+  if (/imac|pc|desktop|intel|microsoft/.test(n)) return "desktop";
+  if (/raspberry|amazon|echo|nest|cam|iot/.test(n)) return "iot";
+  return "phone";
+}
+
 async function buildSnapshot() {
-  const { gateway, devices } = await discover();
+  const ifc = activeIface();
+  if (!ifc) return emptySnapshot();
+  const gw = await gatewayIp();
+  const rtt = await pingSweep(ipsInSubnet(ifc.ip, ifc.netmask));
+  const arp = await readArp();
+  if (!arp.find((r) => r.ip === ifc.ip)) arp.push({ ip: ifc.ip, mac: ifc.mac });
+
+  const bw = await lineBandwidth(ifc.name);
   const now = new Date().toISOString();
-  const out = [];
+  const devices = [];
   const requests = [];
-  for (const d of devices) {
-    const mac = d.mac;
-    if (!state.known[mac]) state.known[mac] = now; // primera vez que se ve
-    const isApproved = state.approved[mac] || d.isGateway || d.ip === activeIface()?.ip;
+
+  for (const r of arp) {
+    const mac = r.mac;
+    const isGw = r.ip === gw;
+    const isSelf = r.ip === ifc.ip;
+    if (!state.known[mac]) state.known[mac] = now;
+    const vendor = vendorOf(mac);
+    const host = await rdns(r.ip);
+    const ms = rtt.get(r.ip);
+    const online = ms !== undefined || isSelf;
+
+    let name = host || vendor;
+    if (isGw) name = "Router / Módem";
+    else if (isSelf) name = "Este equipo (agente)";
+    else if (!name) name = isRandomMac(mac) ? "Dispositivo privado" : `Dispositivo ${r.ip}`;
+
+    const isApproved = state.approved[mac] || isGw || isSelf;
     const isBlocked = !!state.blocked[mac];
+
     if (!isApproved && !isBlocked) {
-      // dispositivo nuevo sin aprobar -> CUARENTENA (solicitud de acceso)
-      requests.push({ mac, ip: d.ip, name: d.name || "Dispositivo nuevo", since: state.known[mac] });
+      requests.push({ mac, ip: r.ip, name: name.startsWith("Dispositivo ") ? "Dispositivo nuevo" : name, since: state.known[mac] });
       continue;
     }
-    out.push({
+    devices.push({
       id: mac,
-      name: d.name || (d.isGateway ? "Router / Módem" : `Dispositivo ${d.ip}`),
-      owner: "—",
-      type: guessType(d.name),
+      name,
+      owner: vendor || (isRandomMac(mac) ? "MAC privada" : "—"),
+      type: guessType(name, vendor),
       mac,
-      ip: d.ip,
+      ip: r.ip,
       status: isBlocked ? "blocked" : "allowed",
-      online: true,
-      downMbps: 0, upMbps: 0, usageTodayGb: 0, connectedMinutes: 0,
-      topApp: d.isGateway ? "puerta de enlace" : "—",
+      online,
+      downMbps: 0,
+      upMbps: 0,
+      usageTodayGb: 0,
+      connectedMinutes: 0,
+      topApp: isBlocked ? "cortado" : online ? (ms !== undefined ? `${ms} ms` : "activo") : "sin respuesta",
       firstSeen: state.known[mac] || "",
     });
   }
   saveState(state);
+
+  const enforce = IS_ROOT ? "ARP real" : "solo marca (sin sudo)";
   return {
-    routerName: ROUTER_NAME,
-    wanIp: gateway || "—",
-    ssid: activeIface()?.name || "LAN",
+    routerName: `${ROUTER_NAME} · corte: ${enforce}`,
+    wanIp: gw || "—",
+    ssid: ifc.name,
     online: true,
-    speed: { downMbps: 0, upMbps: 0, pingMs: 0, jitterMs: 0, planDownMbps: 0, at: "" },
-    devices: out,
+    speed: { downMbps: bw.downMbps, upMbps: bw.upMbps, pingMs: Math.round(rtt.get(gw) || 0), jitterMs: 0, planDownMbps: Math.ceil(peakDown / 10) * 10 || 100, at: now },
+    devices,
     rules: [],
     schedules: [],
     usageByHour: [],
     usageByCategory: [],
     accessRequests: requests,
     totals: {
-      devicesOnline: out.length,
+      devicesOnline: devices.filter((d) => d.online).length,
       usageTodayGb: 0,
-      blockedCount: out.filter((x) => x.status === "blocked").length,
+      blockedCount: devices.filter((d) => d.status === "blocked").length,
       newDevices: requests.length,
     },
   };
 }
-function guessType(name) {
-  const n = (name || "").toLowerCase();
-  if (/iphone|android|phone|pixel|galaxy/.test(n)) return "phone";
-  if (/ipad|tablet/.test(n)) return "tablet";
-  if (/tv|roku|chromecast|firestick/.test(n)) return "tv";
-  if (/playstation|ps4|ps5|xbox|nintendo|switch/.test(n)) return "console";
-  if (/macbook|laptop/.test(n)) return "laptop";
-  if (/imac|pc|desktop/.test(n)) return "desktop";
-  return "phone";
+function emptySnapshot() {
+  return {
+    routerName: ROUTER_NAME, wanIp: "—", ssid: "LAN", online: false,
+    speed: { downMbps: 0, upMbps: 0, pingMs: 0, jitterMs: 0, planDownMbps: 100, at: "" },
+    devices: [], rules: [], schedules: [], usageByHour: [], usageByCategory: [], accessRequests: [],
+    totals: { devicesOnline: 0, usageTodayGb: 0, blockedCount: 0, newDevices: 0 },
+  };
 }
 
-// ---- ENFORCEMENT (cortar de verdad) ----
-// Universal sin API del router = ARP-control (necesita permisos de admin).
-// Aquí se deja el punto de integración; con root se activa el bloqueo real.
-let enforcer = null;
+/* ---- aplica el corte según el estado (arranca/para ARP-cut) ---- */
 async function applyEnforcement() {
-  const blocked = Object.keys(state.blocked);
-  if (blocked.length === 0) return;
-  if (process.getuid && process.getuid() !== 0) {
-    console.warn(`[enforce] ${blocked.length} equipo(s) marcados para cortar, pero el agente NO corre como root: el corte real (ARP) está inactivo. Ejecuta con 'sudo' para activarlo.`);
+  const ifc = activeIface();
+  const gw = await gatewayIp();
+  if (!ifc || !gw) return;
+  if (!IS_ROOT) {
+    const n = Object.keys(state.blocked).length;
+    if (n) console.warn(`[cut] ${n} equipo(s) marcados, pero el agente NO corre como root: corte real inactivo. Usa 'sudo node agent/netcontrol-agent.mjs'.`);
     return;
   }
-  // TODO enforcer real (ARP spoof por MAC objetivo) cuando corre como root.
-  // Integración: bettercap/arpspoof, o convertir el agente en gateway/DHCP.
+  for (const mac of Object.keys(state.blocked)) {
+    const dev = cachedRaw.get(mac);
+    if (dev) startCut(ifc, gw, dev.ip, mac);
+  }
+  for (const mac of cutProcs.keys()) if (!state.blocked[mac]) stopCut(mac);
 }
 
-// ---- API HTTP ----
+/* ---- cache de escaneo ---- */
+let cachedSnapshot = null;
+let cachedRaw = new Map(); // mac -> {ip}
+let scanning = false;
+async function refreshSnapshot() {
+  if (scanning) return;
+  scanning = true;
+  try {
+    cachedSnapshot = await buildSnapshot();
+    cachedRaw = new Map((cachedSnapshot.devices || []).map((d) => [d.mac, { ip: d.ip }]));
+    await applyEnforcement();
+  } catch (e) { console.warn("[scan]", e?.message || e); }
+  scanning = false;
+}
+
+/* ---- API HTTP ---- */
 function send(res, code, body) {
   res.writeHead(code, { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" });
   res.end(JSON.stringify(body));
 }
-function auth(req) {
-  if (!TOKEN) return true;
-  return req.headers["authorization"] === `Bearer ${TOKEN}`;
-}
+function auth(req) { return !TOKEN || req.headers["authorization"] === `Bearer ${TOKEN}`; }
 async function readBody(req) {
   const chunks = [];
   for await (const c of req) chunks.push(c);
   try { return JSON.parse(Buffer.concat(chunks).toString() || "{}"); } catch { return {}; }
 }
 
-// ---- cache de escaneo: refresca en segundo plano, sirve al instante ----
-let cachedSnapshot = null;
-let scanning = false;
-async function refreshSnapshot() {
-  if (scanning) return;
-  scanning = true;
-  try { cachedSnapshot = await buildSnapshot(); } catch (e) { console.warn("[scan]", e?.message || e); }
-  scanning = false;
-}
-
 const server = http.createServer(async (req, res) => {
   if (req.method === "OPTIONS") return send(res, 204, {});
   if (!auth(req)) return send(res, 401, { error: "token inválido" });
   try {
-    if (req.method === "GET" && req.url === "/health") return send(res, 200, { ok: true });
+    if (req.method === "GET" && req.url === "/health") return send(res, 200, { ok: true, root: IS_ROOT });
     if (req.method === "GET" && req.url === "/snapshot") {
-      if (!cachedSnapshot) await refreshSnapshot(); // primera vez: espera
-      else refreshSnapshot(); // siguientes: sirve cache y refresca en 2º plano
+      if (!cachedSnapshot) await refreshSnapshot(); else refreshSnapshot();
       return send(res, 200, cachedSnapshot);
     }
     if (req.method === "POST" && req.url === "/device") {
@@ -243,27 +320,28 @@ const server = http.createServer(async (req, res) => {
       if (status === "allowed") { delete state.blocked[mac]; state.approved[mac] = true; }
       else state.blocked[mac] = true;
       saveState(state); await applyEnforcement();
-      return send(res, 200, { ok: true });
+      return send(res, 200, { ok: true, root: IS_ROOT });
     }
     if (req.method === "POST" && req.url === "/access") {
       const { mac, grant } = await readBody(req);
       if (!mac) return send(res, 400, { error: "mac requerido" });
       if (grant) { state.approved[mac] = true; delete state.blocked[mac]; }
-      else { state.blocked[mac] = true; }
+      else state.blocked[mac] = true;
       saveState(state); await applyEnforcement();
-      return send(res, 200, { ok: true });
+      return send(res, 200, { ok: true, root: IS_ROOT });
     }
     return send(res, 404, { error: "no encontrado" });
-  } catch (e) {
-    return send(res, 500, { error: String(e?.message || e) });
-  }
+  } catch (e) { return send(res, 500, { error: String(e?.message || e) }); }
 });
+
+function cleanup() { for (const mac of cutProcs.keys()) stopCut(mac); process.exit(0); }
+process.on("SIGINT", cleanup);
+process.on("SIGTERM", cleanup);
 
 server.listen(PORT, () => {
   const ifc = activeIface();
   console.log(`NetControl Agent en http://127.0.0.1:${PORT}`);
-  console.log(`Interfaz: ${ifc?.name} ${ifc?.ip}  ·  token: ${TOKEN ? "sí" : "no"}`);
-  console.log(`Endpoints: GET /snapshot · POST /device · POST /access`);
-  refreshSnapshot(); // primer escaneo al arrancar
-  setInterval(refreshSnapshot, 20000); // re-escanea cada 20s
+  console.log(`Interfaz: ${ifc?.name} ${ifc?.ip}  ·  root(corte real): ${IS_ROOT ? "SÍ" : "NO — usa sudo"}`);
+  refreshSnapshot();
+  setInterval(refreshSnapshot, 15000);
 });
