@@ -8,25 +8,29 @@ const config: Config = {
   theme: {
     extend: {
       colors: {
-        base: {
-          900: "#0a0e17",
-          800: "#0f1420",
-          700: "#161d2e",
-          600: "#1e2740",
-          500: "#2a3554",
+        // Branding ASCII Studio (tema claro)
+        bg: "#f8fafc",
+        surface: "#ffffff",
+        ink: "#0f172b",
+        muted: "#62748e",
+        line: "#e2e8f0",
+        accent: {
+          DEFAULT: "#79a4ff",
+          deep: "#6d8fe8",
+          ink: "#4d6fd0",
+          soft: "#eef3ff",
         },
-        brand: {
-          DEFAULT: "#38e1c4",
-          soft: "#8affe6",
-        },
-        accent: "#7c8cff",
-        danger: "#ff5c72",
-        warn: "#ffb84d",
-        ok: "#3ddc84",
+        ok: "#00c758",
+        danger: "#fb2c36",
+        warn: "#f59e0b",
       },
       fontFamily: {
-        sans: ["ui-sans-serif", "system-ui", "-apple-system", "Segoe UI", "Roboto", "sans-serif"],
-        mono: ["ui-monospace", "SFMono-Regular", "Menlo", "monospace"],
+        sans: ["Satoshi", "ui-rounded", "SF Pro Rounded", "system-ui", "-apple-system", "Segoe UI", "sans-serif"],
+        mono: ["ui-monospace", "SFMono-Regular", "Menlo", "Consolas", "monospace"],
+      },
+      boxShadow: {
+        card: "0 24px 48px -28px rgba(15,23,43,0.28)",
+        nav: "0 10px 30px -14px rgba(15,23,43,0.25)",
       },
     },
   },

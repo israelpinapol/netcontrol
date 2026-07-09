@@ -11,28 +11,30 @@ function post(url: string, body: unknown) {
   fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }).catch(() => {});
 }
 
-function StatCard({ icon, label, value, unit, tone = "brand" }: { icon: string; label: string; value: string; unit?: string; tone?: string }) {
+function StatCard({ icon, label, value, unit, tone = "accent" }: { icon: string; label: string; value: string; unit?: string; tone?: string }) {
   const toneMap: Record<string, string> = {
-    brand: "text-brand", accent: "text-accent", ok: "text-ok", warn: "text-warn", danger: "text-danger",
+    accent: "text-accent bg-accent-soft", ok: "text-ok bg-ok/10", warn: "text-warn bg-warn/10", danger: "text-danger bg-danger/10",
   };
   return (
-    <div className="card p-4">
-      <div className="flex items-center gap-2 text-slate-400">
-        <Icon name={icon} className={`h-4 w-4 ${toneMap[tone]}`} />
-        <span className="text-xs font-medium uppercase tracking-wide">{label}</span>
+    <div className="card card-hover p-4">
+      <div className="flex items-center gap-2">
+        <span className={`grid h-7 w-7 place-items-center rounded-lg ${toneMap[tone]}`}>
+          <Icon name={icon} className="h-4 w-4" />
+        </span>
+        <span className="text-[11px] font-semibold uppercase tracking-wide text-muted">{label}</span>
       </div>
-      <div className="mt-2 flex items-baseline gap-1">
-        <span className="text-2xl font-semibold text-white">{value}</span>
-        {unit && <span className="text-sm text-slate-400">{unit}</span>}
+      <div className="mt-2.5 flex items-baseline gap-1">
+        <span className="text-2xl font-bold text-ink tabular-nums">{value}</span>
+        {unit && <span className="text-sm text-muted">{unit}</span>}
       </div>
     </div>
   );
 }
 
 function statusPill(status: DeviceStatus) {
-  if (status === "allowed") return <span className="pill bg-ok/15 text-ok"><span className="h-1.5 w-1.5 rounded-full bg-ok" />Activo</span>;
-  if (status === "paused") return <span className="pill bg-warn/15 text-warn"><Icon name="pause" className="h-3 w-3" />En pausa</span>;
-  return <span className="pill bg-danger/15 text-danger"><Icon name="block" className="h-3 w-3" />Bloqueado</span>;
+  if (status === "allowed") return <span className="pill text-ok"><span className="h-1.5 w-1.5 rounded-full bg-ok" />Activo</span>;
+  if (status === "paused") return <span className="pill text-warn"><Icon name="pause" className="h-3 w-3" />En pausa</span>;
+  return <span className="pill text-danger"><Icon name="block" className="h-3 w-3" />Bloqueado</span>;
 }
 
 export default function Dashboard({ initial }: { initial: NetworkSnapshot }) {
@@ -92,37 +94,38 @@ export default function Dashboard({ initial }: { initial: NetworkSnapshot }) {
     setTesting(false);
   }
 
-  const speedPct = Math.min(100, Math.round((snap.speed.downMbps / snap.speed.planDownMbps) * 100));
+  const speedPct = Math.min(100, Math.round((snap.speed.downMbps / Math.max(1, snap.speed.planDownMbps)) * 100));
 
   return (
-    <div className="mx-auto max-w-6xl px-4 py-6 sm:px-6">
+    <div className="mx-auto max-w-6xl px-4 py-7 sm:px-6">
       {/* Header */}
-      <header className="card mb-5 flex flex-col gap-4 p-4 sm:flex-row sm:items-center sm:justify-between sm:p-5">
-        <div className="flex items-center gap-3">
-          <div className="grid h-11 w-11 place-items-center rounded-xl bg-brand/15 text-brand">
-            <Icon name="wifi" className="h-6 w-6" />
+      <header className="rise rise-1 card mb-5 flex flex-col gap-4 p-4 sm:flex-row sm:items-center sm:justify-between sm:p-5">
+        <div className="flex items-center gap-3.5">
+          <div className="grid h-12 w-12 place-items-center rounded-2xl text-accent shadow-nav" style={{ backgroundImage: "var(--grad-accent)" }}>
+            <Icon name="wifi" className="h-6 w-6 text-white" />
           </div>
           <div>
-            <h1 className="text-lg font-semibold text-white">NetControl</h1>
-            <p className="text-xs text-slate-400">
-              {snap.routerName} · SSID <span className="font-mono text-slate-300">{snap.ssid}</span> · WAN <span className="font-mono text-slate-300">{snap.wanIp}</span>
+            <h1 className="flex items-center text-xl font-bold tracking-tight">
+              <span className="wordmark">NetControl</span>
+              <span className="caret" />
+            </h1>
+            <p className="mt-0.5 text-xs text-muted">
+              {snap.routerName} · SSID <span className="font-mono text-ink/70">{snap.ssid}</span> · WAN <span className="font-mono text-ink/70">{snap.wanIp}</span>
             </p>
           </div>
         </div>
-        <div className="flex items-center gap-3">
-          <span className="pill bg-ok/10 text-ok">
-            <span className="live-dot h-2 w-2 rounded-full bg-ok" /> En línea
-          </span>
-          <button onClick={runSpeedTest} disabled={testing} className="btn btn-ghost">
-            <Icon name="bolt" className="h-4 w-4 text-brand" />
+        <div className="flex items-center gap-2.5">
+          <span className="pill text-ok"><span className="live-dot h-2 w-2 rounded-full bg-ok" />En línea</span>
+          <button onClick={runSpeedTest} disabled={testing} className="btn btn-primary">
+            <Icon name="bolt" className="h-4 w-4" />
             {testing ? "Midiendo…" : "Probar velocidad"}
           </button>
         </div>
       </header>
 
       {/* Stats */}
-      <section className="mb-5 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
-        <StatCard icon="down" label="Descarga" value={snap.speed.downMbps.toFixed(0)} unit="Mbps" tone="brand" />
+      <section className="rise rise-2 mb-5 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
+        <StatCard icon="down" label="Descarga" value={snap.speed.downMbps.toFixed(0)} unit="Mbps" tone="accent" />
         <StatCard icon="up" label="Subida" value={snap.speed.upMbps.toFixed(0)} unit="Mbps" tone="accent" />
         <StatCard icon="ping" label="Ping" value={String(snap.speed.pingMs)} unit="ms" tone="ok" />
         <StatCard icon="devices" label="Dispositivos" value={String(snap.totals.devicesOnline)} unit="online" tone="warn" />
@@ -131,19 +134,19 @@ export default function Dashboard({ initial }: { initial: NetworkSnapshot }) {
 
       {/* Solicitudes de acceso a la red (portal cautivo / NAC) */}
       {snap.accessRequests.length > 0 && (
-        <section className="card mb-5 border-accent/30 bg-accent/5 p-4">
-          <div className="flex items-center gap-2 text-accent">
+        <section className="rise rise-2 card mb-5 p-4" style={{ borderColor: "color-mix(in oklab, var(--accent) 35%, var(--border))", background: "var(--accent-soft)" }}>
+          <div className="flex items-center gap-2 text-accent-ink">
             <Icon name="shield" className="h-5 w-5" />
-            <h2 className="text-sm font-semibold">Solicitudes de acceso a la red · el administrador decide quién entra</h2>
+            <h2 className="text-sm font-bold">Solicitudes de acceso a la red · el administrador decide quién entra</h2>
           </div>
           <div className="mt-3 space-y-2">
             {snap.accessRequests.map((a) => (
-              <div key={a.mac} className="flex flex-wrap items-center justify-between gap-3 rounded-xl bg-base-700/60 p-3">
+              <div key={a.mac} className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-line bg-surface p-3">
                 <div className="flex items-center gap-3">
-                  <DeviceIcon type="phone" className="h-5 w-5 text-slate-300" />
+                  <span className="grid h-9 w-9 place-items-center rounded-lg bg-accent-soft text-accent"><DeviceIcon type="phone" className="h-5 w-5" /></span>
                   <div>
-                    <p className="text-sm font-medium text-white">{a.name}</p>
-                    <p className="font-mono text-xs text-slate-400">{a.mac}{a.ip ? ` · ${a.ip}` : ""}</p>
+                    <p className="text-sm font-semibold text-ink">{a.name}</p>
+                    <p className="font-mono text-xs text-muted">{a.mac}{a.ip ? ` · ${a.ip}` : ""}</p>
                   </div>
                 </div>
                 <div className="flex gap-2">
@@ -158,19 +161,19 @@ export default function Dashboard({ initial }: { initial: NetworkSnapshot }) {
 
       {/* Nuevos dispositivos */}
       {newDevices.length > 0 && (
-        <section className="card mb-5 border-warn/30 bg-warn/5 p-4">
+        <section className="rise rise-2 card mb-5 p-4" style={{ borderColor: "color-mix(in oklab, var(--warn) 40%, var(--border))", background: "color-mix(in oklab, var(--warn) 8%, #fff)" }}>
           <div className="flex items-center gap-2 text-warn">
             <Icon name="alert" className="h-5 w-5" />
-            <h2 className="text-sm font-semibold">Dispositivo nuevo intentando conectarse</h2>
+            <h2 className="text-sm font-bold">Dispositivo nuevo intentando conectarse</h2>
           </div>
           <div className="mt-3 space-y-2">
             {newDevices.map((d) => (
-              <div key={d.id} className="flex flex-wrap items-center justify-between gap-3 rounded-xl bg-base-700/60 p-3">
+              <div key={d.id} className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-line bg-surface p-3">
                 <div className="flex items-center gap-3">
-                  <DeviceIcon type={d.type} className="h-5 w-5 text-slate-300" />
+                  <span className="grid h-9 w-9 place-items-center rounded-lg bg-warn/10 text-warn"><DeviceIcon type={d.type} className="h-5 w-5" /></span>
                   <div>
-                    <p className="text-sm font-medium text-white">{d.name}</p>
-                    <p className="font-mono text-xs text-slate-400">{d.mac} · {d.ip}</p>
+                    <p className="text-sm font-semibold text-ink">{d.name}</p>
+                    <p className="font-mono text-xs text-muted">{d.mac} · {d.ip}</p>
                   </div>
                 </div>
                 <div className="flex gap-2">
@@ -183,14 +186,14 @@ export default function Dashboard({ initial }: { initial: NetworkSnapshot }) {
         </section>
       )}
 
-      <div className="grid grid-cols-1 gap-5 lg:grid-cols-3">
+      <div className="rise rise-3 grid grid-cols-1 gap-5 lg:grid-cols-3">
         {/* Dispositivos */}
-        <section className="card lg:col-span-2">
-          <div className="flex items-center justify-between border-b border-white/5 p-4">
-            <h2 className="flex items-center gap-2 text-sm font-semibold text-white"><Icon name="devices" className="h-4 w-4 text-brand" />Dispositivos en la red</h2>
-            <span className="text-xs text-slate-400">{snap.devices.length} equipos · {snap.totals.blockedCount} bloqueados</span>
+        <section className="card card-hover overflow-hidden p-0 lg:col-span-2">
+          <div className="flex items-center justify-between border-b border-line p-4">
+            <h2 className="flex items-center gap-2 text-sm font-bold text-ink"><Icon name="devices" className="h-4 w-4 text-accent" />Dispositivos en la red</h2>
+            <span className="text-xs text-muted">{snap.devices.length} equipos · {snap.totals.blockedCount} bloqueados</span>
           </div>
-          <div className="divide-y divide-white/5">
+          <div className="divide-y divide-line">
             {snap.devices.map((d) => (
               <DeviceRow key={d.id} d={d} onStatus={setStatus} />
             ))}
@@ -199,25 +202,25 @@ export default function Dashboard({ initial }: { initial: NetworkSnapshot }) {
 
         {/* Velocidad + ancho de banda */}
         <section className="space-y-5">
-          <div className="card p-4">
-            <h2 className="mb-3 flex items-center gap-2 text-sm font-semibold text-white"><Icon name="bolt" className="h-4 w-4 text-brand" />Velocidad del plan</h2>
-            <div className="relative h-3 w-full overflow-hidden rounded-full bg-base-700">
-              <div className="h-full rounded-full bg-gradient-to-r from-brand to-brand-soft transition-all duration-700" style={{ width: `${speedPct}%` }} />
+          <div className="card card-hover p-4">
+            <h2 className="mb-3 flex items-center gap-2 text-sm font-bold text-ink"><Icon name="bolt" className="h-4 w-4 text-accent" />Velocidad del plan</h2>
+            <div className="relative h-3 w-full overflow-hidden rounded-full bg-line">
+              <div className="fill-anim h-full rounded-full transition-all duration-700" style={{ width: `${speedPct}%`, backgroundImage: "var(--grad-accent)" }} />
             </div>
-            <div className="mt-2 flex justify-between text-xs text-slate-400">
+            <div className="mt-2 flex justify-between text-xs text-muted">
               <span>{snap.speed.downMbps.toFixed(0)} Mbps usados</span>
               <span>Plan {snap.speed.planDownMbps} Mbps</span>
             </div>
             <div className="mt-4 grid grid-cols-2 gap-3 text-center">
-              <div className="rounded-xl bg-base-700/60 p-3"><p className="text-lg font-semibold text-white">{snap.speed.pingMs} <span className="text-xs font-normal text-slate-400">ms</span></p><p className="text-xs text-slate-400">Latencia</p></div>
-              <div className="rounded-xl bg-base-700/60 p-3"><p className="text-lg font-semibold text-white">{snap.speed.jitterMs} <span className="text-xs font-normal text-slate-400">ms</span></p><p className="text-xs text-slate-400">Jitter</p></div>
+              <div className="rounded-xl border border-line bg-bg p-3"><p className="text-lg font-bold text-ink tabular-nums">{snap.speed.pingMs} <span className="text-xs font-normal text-muted">ms</span></p><p className="text-xs text-muted">Latencia</p></div>
+              <div className="rounded-xl border border-line bg-bg p-3"><p className="text-lg font-bold text-ink tabular-nums">{snap.speed.jitterMs} <span className="text-xs font-normal text-muted">ms</span></p><p className="text-xs text-muted">Jitter</p></div>
             </div>
           </div>
 
           {snap.usageByCategory.length > 0 && (
-          <div className="card p-4">
-            <h2 className="mb-3 flex items-center gap-2 text-sm font-semibold text-white"><Icon name="data" className="h-4 w-4 text-accent" />Uso por categoría</h2>
-            <div className="mb-3 flex h-3 w-full overflow-hidden rounded-full">
+          <div className="card card-hover p-4">
+            <h2 className="mb-3 flex items-center gap-2 text-sm font-bold text-ink"><Icon name="data" className="h-4 w-4 text-accent" />Uso por categoría</h2>
+            <div className="mb-3 flex h-3 w-full overflow-hidden rounded-full border border-line">
               {snap.usageByCategory.map((c) => (
                 <div key={c.label} style={{ width: `${(c.gb / totalCat) * 100}%`, background: c.color }} title={`${c.label}: ${c.gb} GB`} />
               ))}
@@ -225,8 +228,8 @@ export default function Dashboard({ initial }: { initial: NetworkSnapshot }) {
             <ul className="space-y-1.5">
               {snap.usageByCategory.map((c) => (
                 <li key={c.label} className="flex items-center justify-between text-xs">
-                  <span className="flex items-center gap-2 text-slate-300"><span className="h-2.5 w-2.5 rounded-sm" style={{ background: c.color }} />{c.label}</span>
-                  <span className="font-mono text-slate-400">{c.gb} GB</span>
+                  <span className="flex items-center gap-2 text-ink/80"><span className="h-2.5 w-2.5 rounded-sm" style={{ background: c.color }} />{c.label}</span>
+                  <span className="font-mono text-muted tabular-nums">{c.gb} GB</span>
                 </li>
               ))}
             </ul>
@@ -237,35 +240,35 @@ export default function Dashboard({ initial }: { initial: NetworkSnapshot }) {
 
       {/* Ancho de banda por hora */}
       {snap.usageByHour.length > 0 && (
-      <section className="card mt-5 p-4">
-        <h2 className="mb-4 flex items-center gap-2 text-sm font-semibold text-white"><Icon name="data" className="h-4 w-4 text-brand" />Consumo de hoy por hora</h2>
+      <section className="rise rise-4 card mt-5 p-4">
+        <h2 className="mb-4 flex items-center gap-2 text-sm font-bold text-ink"><Icon name="data" className="h-4 w-4 text-accent" />Consumo de hoy por hora</h2>
         <div className="flex h-40 items-end gap-1.5 sm:gap-2">
-          {snap.usageByHour.map((u) => (
+          {snap.usageByHour.map((u, i) => (
             <div key={u.hour} className="group flex flex-1 flex-col items-center gap-1">
-              <span className="text-[10px] text-slate-500 opacity-0 transition group-hover:opacity-100">{u.gb}GB</span>
-              <div className="w-full rounded-t bg-gradient-to-t from-accent/40 to-brand transition-all duration-500 hover:from-accent hover:to-brand-soft" style={{ height: `${(u.gb / maxHour) * 100}%` }} />
-              <span className="text-[10px] text-slate-500">{u.hour}</span>
+              <span className="text-[10px] font-medium text-muted opacity-0 transition group-hover:opacity-100">{u.gb}GB</span>
+              <div className="bar-grow w-full rounded-t transition-all duration-300 group-hover:brightness-110" style={{ height: `${(u.gb / maxHour) * 100}%`, backgroundImage: "linear-gradient(to top, #cdd9ff, #79a4ff)", animationDelay: `${i * 0.035}s` }} />
+              <span className="text-[10px] text-muted tabular-nums">{u.hour}</span>
             </div>
           ))}
         </div>
       </section>
       )}
 
-      <div className="mt-5 grid grid-cols-1 gap-5 lg:grid-cols-2">
+      <div className="rise rise-5 mt-5 grid grid-cols-1 gap-5 lg:grid-cols-2">
         {/* Reglas de bloqueo */}
-        <section className="card">
-          <div className="flex items-center justify-between border-b border-white/5 p-4">
-            <h2 className="flex items-center gap-2 text-sm font-semibold text-white"><Icon name="shield" className="h-4 w-4 text-danger" />Bloqueo de webs y apps</h2>
+        <section className="card card-hover overflow-hidden p-0">
+          <div className="flex items-center justify-between border-b border-line p-4">
+            <h2 className="flex items-center gap-2 text-sm font-bold text-ink"><Icon name="shield" className="h-4 w-4 text-danger" />Bloqueo de webs y apps</h2>
             <button className="btn btn-ghost text-xs"><Icon name="plus" className="h-3.5 w-3.5" />Regla</button>
           </div>
-          <ul className="divide-y divide-white/5">
+          <ul className="divide-y divide-line">
             {snap.rules.map((r) => (
               <li key={r.id} className="flex items-center justify-between p-4">
                 <div className="flex items-center gap-3">
-                  <span className={`grid h-8 w-8 place-items-center rounded-lg ${r.enabled ? "bg-danger/15 text-danger" : "bg-white/5 text-slate-500"}`}><Icon name={r.kind === "site" ? "globe" : "block"} className="h-4 w-4" /></span>
+                  <span className={`grid h-8 w-8 place-items-center rounded-lg ${r.enabled ? "bg-danger/10 text-danger" : "bg-bg text-muted"}`}><Icon name={r.kind === "site" ? "globe" : "block"} className="h-4 w-4" /></span>
                   <div>
-                    <p className="font-mono text-sm text-white">{r.target}</p>
-                    <p className="text-xs text-slate-400">{r.scopeLabel} · {r.kind === "site" ? "sitio" : r.kind === "app" ? "app" : "categoría"}</p>
+                    <p className="font-mono text-sm text-ink">{r.target}</p>
+                    <p className="text-xs text-muted">{r.scopeLabel} · {r.kind === "site" ? "sitio" : r.kind === "app" ? "app" : "categoría"}</p>
                   </div>
                 </div>
                 <Toggle on={r.enabled} onClick={() => toggleRule(r.id)} />
@@ -275,20 +278,20 @@ export default function Dashboard({ initial }: { initial: NetworkSnapshot }) {
         </section>
 
         {/* Horarios */}
-        <section className="card">
-          <div className="flex items-center justify-between border-b border-white/5 p-4">
-            <h2 className="flex items-center gap-2 text-sm font-semibold text-white"><Icon name="clock" className="h-4 w-4 text-warn" />Horarios y límites</h2>
+        <section className="card card-hover overflow-hidden p-0">
+          <div className="flex items-center justify-between border-b border-line p-4">
+            <h2 className="flex items-center gap-2 text-sm font-bold text-ink"><Icon name="clock" className="h-4 w-4 text-warn" />Horarios y límites</h2>
             <button className="btn btn-ghost text-xs"><Icon name="plus" className="h-3.5 w-3.5" />Horario</button>
           </div>
-          <ul className="divide-y divide-white/5">
+          <ul className="divide-y divide-line">
             {snap.schedules.map((sc) => (
               <li key={sc.id} className="flex items-center justify-between gap-3 p-4">
                 <div>
-                  <p className="text-sm font-medium text-white">{sc.label}</p>
-                  <p className="text-xs text-slate-400">{sc.scopeLabel} · {sc.from}–{sc.to} · {sc.action === "cutoff" ? "corte" : "límite de velocidad"}</p>
+                  <p className="text-sm font-semibold text-ink">{sc.label}</p>
+                  <p className="text-xs text-muted">{sc.scopeLabel} · {sc.from}–{sc.to} · {sc.action === "cutoff" ? "corte" : "límite de velocidad"}</p>
                   <div className="mt-1.5 flex gap-1">
                     {DAYS.map((d, i) => (
-                      <span key={i} className={`grid h-4 w-4 place-items-center rounded text-[9px] ${sc.days.includes(i) ? "bg-warn/20 text-warn" : "bg-white/5 text-slate-600"}`}>{d}</span>
+                      <span key={i} className={`grid h-4 w-4 place-items-center rounded text-[9px] font-semibold ${sc.days.includes(i) ? "bg-warn/15 text-warn" : "bg-bg text-muted/60"}`}>{d}</span>
                     ))}
                   </div>
                 </div>
@@ -299,8 +302,8 @@ export default function Dashboard({ initial }: { initial: NetworkSnapshot }) {
         </section>
       </div>
 
-      <footer className="mt-8 pb-4 text-center text-xs text-slate-500">
-        NetControl · panel demo con datos simulados · listo para conectar a un agente local (Pi-hole · OpenWRT · UniFi · MikroTik · Firewalla)
+      <footer className="mt-9 pb-4 text-center text-xs text-muted">
+        <span className="font-mono">NetControl</span> · panel demo con datos simulados · listo para conectar a un agente local (Agente · AdGuard · OpenWRT · UniFi · MikroTik · Firewalla)
       </footer>
     </div>
   );
@@ -308,26 +311,26 @@ export default function Dashboard({ initial }: { initial: NetworkSnapshot }) {
 
 function DeviceRow({ d, onStatus }: { d: Device; onStatus: (id: string, s: DeviceStatus) => void }) {
   return (
-    <div className="flex flex-wrap items-center justify-between gap-3 p-4">
+    <div className="flex flex-wrap items-center justify-between gap-3 p-4 transition-colors hover:bg-accent-soft/50">
       <div className="flex min-w-0 items-center gap-3">
-        <span className={`grid h-9 w-9 shrink-0 place-items-center rounded-lg ${d.online ? "bg-brand/10 text-brand" : "bg-white/5 text-slate-500"}`}>
+        <span className={`grid h-9 w-9 shrink-0 place-items-center rounded-lg ${d.online ? "bg-accent-soft text-accent" : "bg-bg text-muted"}`}>
           <DeviceIcon type={d.type} />
         </span>
         <div className="min-w-0">
-          <p className="truncate text-sm font-medium text-white">{d.name}</p>
-          <p className="truncate font-mono text-xs text-slate-400">{d.ip} · {d.owner} · {d.topApp}</p>
+          <p className="truncate text-sm font-semibold text-ink">{d.name}</p>
+          <p className="truncate font-mono text-xs text-muted">{d.ip} · {d.owner} · {d.topApp}</p>
         </div>
       </div>
       <div className="flex items-center gap-4">
         <div className="hidden text-right sm:block">
-          <p className="text-sm text-white">{d.online ? `${d.downMbps.toFixed(1)} Mbps` : "—"}</p>
-          <p className="text-xs text-slate-400">{d.usageTodayGb} GB hoy</p>
+          <p className="text-sm font-medium text-ink tabular-nums">{d.online ? `${d.downMbps.toFixed(1)} Mbps` : "—"}</p>
+          <p className="text-xs text-muted tabular-nums">{d.usageTodayGb} GB hoy</p>
         </div>
         {statusPill(d.status)}
         <div className="flex gap-1.5">
-          {d.status !== "allowed" && <button title="Permitir" onClick={() => onStatus(d.id, "allowed")} className="btn btn-ok px-2 py-1.5"><Icon name="check" className="h-4 w-4" /></button>}
-          {d.status === "allowed" && <button title="Pausar" onClick={() => onStatus(d.id, "paused")} className="btn btn-ghost px-2 py-1.5 text-warn"><Icon name="pause" className="h-4 w-4" /></button>}
-          {d.status !== "blocked" && <button title="Cortar acceso" onClick={() => onStatus(d.id, "blocked")} className="btn btn-danger px-2 py-1.5"><Icon name="block" className="h-4 w-4" /></button>}
+          {d.status !== "allowed" && <button title="Permitir" onClick={() => onStatus(d.id, "allowed")} className="btn btn-ok px-2"><Icon name="check" className="h-4 w-4" /></button>}
+          {d.status === "allowed" && <button title="Pausar" onClick={() => onStatus(d.id, "paused")} className="btn btn-ghost px-2 text-warn"><Icon name="pause" className="h-4 w-4" /></button>}
+          {d.status !== "blocked" && <button title="Cortar acceso" onClick={() => onStatus(d.id, "blocked")} className="btn btn-danger px-2"><Icon name="block" className="h-4 w-4" /></button>}
         </div>
       </div>
     </div>
@@ -335,9 +338,5 @@ function DeviceRow({ d, onStatus }: { d: Device; onStatus: (id: string, s: Devic
 }
 
 function Toggle({ on, onClick }: { on: boolean; onClick: () => void }) {
-  return (
-    <button onClick={onClick} className={`relative h-6 w-11 shrink-0 rounded-full transition-colors ${on ? "bg-brand" : "bg-base-600"}`} aria-pressed={on}>
-      <span className={`absolute top-0.5 h-5 w-5 rounded-full bg-white shadow transition-transform ${on ? "translate-x-5" : "translate-x-0.5"}`} />
-    </button>
-  );
+  return <button onClick={onClick} className="switch" data-on={on} aria-pressed={on} />;
 }
