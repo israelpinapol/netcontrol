@@ -22,6 +22,9 @@ const exec = promisify(_exec);
 const PORT = Number(process.env.AGENT_PORT || 4000);
 const TOKEN = process.env.AGENT_TOKEN || "";
 const ROUTER_NAME = process.env.ROUTER_NAME || "Casa - Agente NetControl";
+// Modo control de acceso (cuarentena de nuevos). Por defecto APAGADO: se ven
+// TODOS los dispositivos de una. Con AGENT_NAC=1 los nuevos entran en cuarentena.
+const NAC = process.env.AGENT_NAC === "1";
 const __dir = path.dirname(fileURLToPath(import.meta.url));
 const STATE_FILE = path.join(__dir, "agent-state.json");
 const ARP_CUT = path.join(__dir, "arp-cut.py");
@@ -208,7 +211,9 @@ async function buildSnapshot() {
     const isApproved = state.approved[mac] || isGw || isSelf;
     const isBlocked = !!state.blocked[mac];
 
-    if (!isApproved && !isBlocked) {
+    // Sólo en modo NAC los dispositivos nuevos se ocultan en cuarentena.
+    // Por defecto (sin NAC) TODOS se muestran en la lista.
+    if (NAC && !isApproved && !isBlocked) {
       requests.push({ mac, ip: r.ip, name: name.startsWith("Dispositivo ") ? "Dispositivo nuevo" : name, since: state.known[mac] });
       continue;
     }
